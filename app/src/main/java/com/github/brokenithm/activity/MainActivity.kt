@@ -497,10 +497,10 @@ class MainActivity : AppCompatActivity() {
                             val curAir = ((y - airAreaHeight) / airBlockHeight).toInt()
                             thisAirHeight = if(mSimpleAir) 0 else thisAirHeight.coerceAtMost(curAir)
                         }
-                        in currentButtonAreaHeight..windowHeight -> {
+                        in (currentButtonAreaHeight - windowHeight * 0.15f)..windowHeight -> {
                             val pointPos = x / buttonBlockWidth
                             var index = pointPos.toInt()
-                            if (index >= numOfButtons) index = numOfButtons - 1
+                            index = index.coerceIn(0, numOfButtons - 1)
 
                             if (mEnableTouchSize) {
                                 val centerButton = index
