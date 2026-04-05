@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity() {
 
     // LEDs
     private lateinit var mLEDBitmap: Bitmap
+    private val mLEDPaint = Paint()
     private lateinit var mLEDCanvas: Canvas
     private var buttonWidth = 0f
     private var gapWidth = 0f
@@ -479,9 +480,9 @@ class MainActivity : AppCompatActivity() {
             val touchedButtons = HashSet<Int>()
             var thisAirHeight = 6
             var maxTouchedSize = 0f
-            if (event.action != KeyEvent.ACTION_UP && event.action != MotionEvent.ACTION_CANCEL) {
+            if (event.actionMasked != MotionEvent.ACTION_UP && event.actionMasked != MotionEvent.ACTION_CANCEL) {
                 var ignoredIndex = -1
-                if (event.actionMasked == MotionEvent.ACTION_POINTER_UP)
+                if (event.actionMasked == MotionEvent.ACTION_POINTER_UP || event.actionMasked == MotionEvent.ACTION_UP)
                     ignoredIndex = event.actionIndex
                 for (i in 0 until totalTouches) {
                     if (i == ignoredIndex)
@@ -499,7 +500,7 @@ class MainActivity : AppCompatActivity() {
                         in currentButtonAreaHeight..windowHeight -> {
                             val pointPos = x / buttonBlockWidth
                             var index = pointPos.toInt()
-                            if (index > numOfButtons) index = numOfButtons
+                            if (index >= numOfButtons) index = numOfButtons - 1
 
                             if (mEnableTouchSize) {
                                 val centerButton = index
@@ -772,7 +773,7 @@ class MainActivity : AppCompatActivity() {
                             continue
                         }
                         //Thread.yield()
-                        Thread.sleep(1)
+                        java.util.concurrent.locks.LockSupport.parkNanos(1_000_000L)
                     }
                 } else {
                     val socket = try {
@@ -806,7 +807,7 @@ class MainActivity : AppCompatActivity() {
                             continue
                         }
                         //Thread.sleep(2)
-                        Thread.sleep(1)
+                        java.util.concurrent.locks.LockSupport.parkNanos(1_000_000L)
                     }
                     socket.close()
                 }
@@ -1092,12 +1093,11 @@ class MainActivity : AppCompatActivity() {
                 else -> continue
             }
             val right = left + width
-            mLEDCanvas.drawRect(left, 0f, right, drawHeight.toFloat(), color.toPaint())
+            mLEDCanvas.drawRect(left, 0f, right, drawHeight.toFloat(), mLEDPaint.apply { setColor(color.toInt()) })
             drawXOffset += width
         }
         mButtonRenderer.postInvalidate()
     }
-    private fun Long.toPaint(): Paint = Paint().apply { color = toInt() }
 
     companion object {
         private const val TAG = "Brokenithm"
