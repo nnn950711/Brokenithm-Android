@@ -779,7 +779,7 @@ class MainActivity : AppCompatActivity() {
                             continue
                         }
                         //Thread.yield()
-                        java.util.concurrent.locks.LockSupport.parkNanos(1_000_000L)
+                        java.util.concurrent.locks.LockSupport.parkNanos(8_000_000L)
                     }
                 } else {
                     val socket = try {
@@ -813,7 +813,7 @@ class MainActivity : AppCompatActivity() {
                             continue
                         }
                         //Thread.sleep(2)
-                        java.util.concurrent.locks.LockSupport.parkNanos(1_000_000L)
+                        java.util.concurrent.locks.LockSupport.parkNanos(8_000_000L)
                     }
                     socket.close()
                 }
