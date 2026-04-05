@@ -57,12 +57,18 @@ class MainActivity : AppCompatActivity() {
     private var mLastButtons = HashSet<Int>()
     private var mTestButton = false
     private var mServiceButton = false
-    private data class InputEvent(val keys: MutableSet<Int>? = null, val airHeight : Int = 6, val testButton: Boolean = false, val serviceButton: Boolean = false)
+    private data class InputEvent(var keys: MutableSet<Int>? = null, var airHeight : Int = 6, var testButton: Boolean = false, var serviceButton: Boolean = false)
     //private var mInputQueue = ArrayDeque<InputEvent>()
 
     // LEDs
     private lateinit var mLEDBitmap: Bitmap
     private val mLEDPaint = Paint()
+    private val mCachedIoBuffer = IoBuffer()
+    private val mCachedPacketBuf = ByteArray(48)
+    private val mCachedPacket = DatagramPacket(mCachedPacketBuf, 48)
+    private val mCachedCardBuf = ByteArray(24)
+    private val mCachedCardPacket = DatagramPacket(mCachedCardBuf, 24)
+    private var mCachedInputEvent = InputEvent()
     private lateinit var mLEDCanvas: Canvas
     private var buttonWidth = 0f
     private var gapWidth = 0f
@@ -762,12 +768,12 @@ class MainActivity : AppCompatActivity() {
                     while (!mExitFlag) {
                         if (mShowDelay)
                             sendTCPPing()
-                        val buttons = InputEvent(mLastButtons, mCurrentAirHeight, mTestButton, mServiceButton)
-                        val buffer = applyKeys(buttons, IoBuffer())
+                        mCachedInputEvent.keys = mLastButtons; mCachedInputEvent.airHeight = mCurrentAirHeight; mCachedInputEvent.testButton = mTestButton; mCachedInputEvent.serviceButton = mServiceButton
+                        val buffer = applyKeys(mCachedInputEvent, mCachedIoBuffer)
                         try {
-                            mTCPSocket.getOutputStream().write(constructBuffer(buffer))
+                            mTCPSocket.getOutputStream().write(constructBuffer(buffer, mCachedPacketBuf))
                             if (mEnableNFC)
-                                mTCPSocket.getOutputStream().write(constructCardData())
+                                mTCPSocket.getOutputStream().write(constructCardData(mCachedCardBuf))
                         } catch (e: Exception) {
                             e.printStackTrace()
                             continue
@@ -794,13 +800,13 @@ class MainActivity : AppCompatActivity() {
                     while (!mExitFlag) {
                         if (mShowDelay)
                             sendPing(address)
-                        val buttons = InputEvent(mLastButtons, mCurrentAirHeight, mTestButton, mServiceButton)
-                        val buffer = applyKeys(buttons/* ?: InputEvent()*/, IoBuffer())
-                        val packet = constructPacket(buffer)
+                        mCachedInputEvent.keys = mLastButtons; mCachedInputEvent.airHeight = mCurrentAirHeight; mCachedInputEvent.testButton = mTestButton; mCachedInputEvent.serviceButton = mServiceButton
+                        val buffer = applyKeys(mCachedInputEvent, mCachedIoBuffer)
+                        val packet = constructPacket(buffer, mCachedPacketBuf, mCachedPacket)
                         try {
                             socket.send(packet)
                             if (mEnableNFC)
-                                socket.send(constructCardPacket())
+                                socket.send(constructCardPacket(mCachedCardBuf, mCachedCardPacket))
                         } catch (e: Exception) {
                             e.printStackTrace()
                             Thread.sleep(100)
@@ -999,8 +1005,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var currentPacketId = 1
-    private fun constructBuffer(buffer: IoBuffer): ByteArray {
-        val realBuf = ByteArray(48)
+    private fun constructBuffer(buffer: IoBuffer, realBuf: ByteArray): ByteArray {
+
         realBuf[0] = buffer.length.toByte()
         buffer.header.copyInto(realBuf, 1)
         ByteBuffer.wrap(realBuf).putInt(4, currentPacketId++)
@@ -1017,13 +1023,13 @@ class MainActivity : AppCompatActivity() {
         return realBuf
     }
 
-    private fun constructPacket(buffer: IoBuffer): DatagramPacket {
-        val realBuf = constructBuffer(buffer)
-        return DatagramPacket(realBuf, buffer.length + 1)
+    private fun constructPacket(buffer: IoBuffer, packetBuf: ByteArray, packet: DatagramPacket): DatagramPacket {
+        constructBuffer(buffer, packetBuf)
+        packet.length = buffer.length + 1; return packet
     }
 
-    private fun constructCardData(): ByteArray {
-        val buf = ByteArray(24)
+    private fun constructCardData(buf: ByteArray): ByteArray {
+
         byteArrayOf(15, 'C'.byte(), 'R'.byte(), 'D'.byte()).copyInto(buf)
         buf[4] = if (hasCard) 1 else 0
         buf[5] = cardType.ordinal.toByte()
@@ -1032,9 +1038,9 @@ class MainActivity : AppCompatActivity() {
         return buf
     }
 
-    private fun constructCardPacket(): DatagramPacket {
-        val buf = constructCardData()
-        return DatagramPacket(buf, buf[0] + 1)
+    private fun constructCardPacket(buf: ByteArray, packet: DatagramPacket): DatagramPacket {
+        constructCardData(buf)
+        packet.length = buf[0] + 1; return packet
     }
 
     private val airUpdateInterval = 10L
@@ -1050,9 +1056,10 @@ class MainActivity : AppCompatActivity() {
                 buffer.header = byteArrayOf('I'.byte(), 'P'.byte(), 'T'.byte())
             }
 
-            if (event.keys != null && event.keys.isNotEmpty()) {
+            buffer.slider.fill(0)
+            if (event.keys != null && event.keys!!.isNotEmpty()) {
                 for (i in 0 until 32) {
-                    buffer.slider[31 - i] = if (event.keys.contains(i)) 0x80.toByte() else 0x0
+                    buffer.slider[31 - i] = if (event.keys!!.contains(i)) 0x80.toByte() else 0x0
                 }
             }
 
