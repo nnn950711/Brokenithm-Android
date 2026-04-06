@@ -495,15 +495,14 @@ class MainActivity : AppCompatActivity() {
                         continue
                     val x = event.getX(i) + mTouchAreaRect!!.left - windowLeft
                     val y = event.getY(i) + mTouchAreaRect!!.top - windowTop
-                    when(y) {
-                        in 0f..currentAirAreaHeight -> {
-                            thisAirHeight = 0
-                        }
-                        in currentAirAreaHeight..currentButtonAreaHeight -> {
-                            val curAir = ((y - airAreaHeight) / airBlockHeight).toInt()
-                            thisAirHeight = if(mSimpleAir) 0 else thisAirHeight.coerceAtMost(curAir)
-                        }
-                        in (currentButtonAreaHeight - windowHeight * 0.15f)..windowHeight -> {
+                    if (y >= 0f && y <= currentAirAreaHeight) {
+                        thisAirHeight = 0
+                    }
+                    if (y > currentAirAreaHeight && y <= currentButtonAreaHeight) {
+                        val curAir = ((y - airAreaHeight) / airBlockHeight).toInt()
+                        thisAirHeight = if(mSimpleAir) 0 else thisAirHeight.coerceAtMost(curAir)
+                    }
+                    if (y >= (currentButtonAreaHeight - windowHeight * 0.15f) && y <= windowHeight) {
                             val pointPos = x / buttonBlockWidth
                             var index = pointPos.toInt()
                             index = index.coerceIn(0, numOfButtons - 1)
@@ -561,7 +560,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-            }
             else
                 thisAirHeight = 6
             if (mEnableVibrate) {
