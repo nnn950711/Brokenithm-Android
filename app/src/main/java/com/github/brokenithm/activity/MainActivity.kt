@@ -57,11 +57,18 @@ class MainActivity : AppCompatActivity() {
     private var mLastButtons = HashSet<Int>()
     private var mTestButton = false
     private var mServiceButton = false
-    private data class InputEvent(val keys: MutableSet<Int>? = null, val airHeight : Int = 6, val testButton: Boolean = false, val serviceButton: Boolean = false)
+    private data class InputEvent(var keys: MutableSet<Int>? = null, var airHeight : Int = 6, var testButton: Boolean = false, var serviceButton: Boolean = false)
     //private var mInputQueue = ArrayDeque<InputEvent>()
 
     // LEDs
     private lateinit var mLEDBitmap: Bitmap
+    private val mLEDPaint = Paint()
+    private val mCachedIoBuffer = IoBuffer()
+    private val mCachedPacketBuf = ByteArray(48)
+    private val mCachedPacket = DatagramPacket(mCachedPacketBuf, 48)
+    private val mCachedCardBuf = ByteArray(24)
+    private val mCachedCardPacket = DatagramPacket(mCachedCardBuf, 24)
+    private var mCachedInputEvent = InputEvent()
     private lateinit var mLEDCanvas: Canvas
     private var buttonWidth = 0f
     private var gapWidth = 0f
@@ -479,27 +486,26 @@ class MainActivity : AppCompatActivity() {
             val touchedButtons = HashSet<Int>()
             var thisAirHeight = 6
             var maxTouchedSize = 0f
-            if (event.action != KeyEvent.ACTION_UP && event.action != MotionEvent.ACTION_CANCEL) {
+            if (event.actionMasked != MotionEvent.ACTION_UP && event.actionMasked != MotionEvent.ACTION_CANCEL) {
                 var ignoredIndex = -1
-                if (event.actionMasked == MotionEvent.ACTION_POINTER_UP)
+                if (event.actionMasked == MotionEvent.ACTION_POINTER_UP || event.actionMasked == MotionEvent.ACTION_UP)
                     ignoredIndex = event.actionIndex
                 for (i in 0 until totalTouches) {
                     if (i == ignoredIndex)
                         continue
                     val x = event.getX(i) + mTouchAreaRect!!.left - windowLeft
                     val y = event.getY(i) + mTouchAreaRect!!.top - windowTop
-                    when(y) {
-                        in 0f..currentAirAreaHeight -> {
-                            thisAirHeight = 0
-                        }
-                        in currentAirAreaHeight..currentButtonAreaHeight -> {
-                            val curAir = ((y - airAreaHeight) / airBlockHeight).toInt()
-                            thisAirHeight = if(mSimpleAir) 0 else thisAirHeight.coerceAtMost(curAir)
-                        }
-                        in currentButtonAreaHeight..windowHeight -> {
+                    if (y >= 0f && y <= currentAirAreaHeight) {
+                        thisAirHeight = 0
+                    }
+                    if (y > currentAirAreaHeight && y <= currentButtonAreaHeight) {
+                        val curAir = ((y - airAreaHeight) / airBlockHeight).toInt()
+                        thisAirHeight = if(mSimpleAir) 0 else thisAirHeight.coerceAtMost(curAir)
+                    }
+                    if (y >= (currentButtonAreaHeight - windowHeight * 0.15f) && y <= windowHeight) {
                             val pointPos = x / buttonBlockWidth
                             var index = pointPos.toInt()
-                            if (index > numOfButtons) index = numOfButtons
+                            index = index.coerceIn(0, numOfButtons - 1)
 
                             if (mEnableTouchSize) {
                                 val centerButton = index
@@ -554,7 +560,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-            }
             else
                 thisAirHeight = 6
             if (mEnableVibrate) {
@@ -761,18 +766,18 @@ class MainActivity : AppCompatActivity() {
                     while (!mExitFlag) {
                         if (mShowDelay)
                             sendTCPPing()
-                        val buttons = InputEvent(mLastButtons, mCurrentAirHeight, mTestButton, mServiceButton)
-                        val buffer = applyKeys(buttons, IoBuffer())
+                        mCachedInputEvent.keys = mLastButtons; mCachedInputEvent.airHeight = mCurrentAirHeight; mCachedInputEvent.testButton = mTestButton; mCachedInputEvent.serviceButton = mServiceButton
+                        val buffer = applyKeys(mCachedInputEvent, mCachedIoBuffer)
                         try {
-                            mTCPSocket.getOutputStream().write(constructBuffer(buffer))
+                            mTCPSocket.getOutputStream().write(constructBuffer(buffer, mCachedPacketBuf))
                             if (mEnableNFC)
-                                mTCPSocket.getOutputStream().write(constructCardData())
+                                mTCPSocket.getOutputStream().write(constructCardData(mCachedCardBuf))
                         } catch (e: Exception) {
                             e.printStackTrace()
                             continue
                         }
                         //Thread.yield()
-                        Thread.sleep(1)
+                        java.util.concurrent.locks.LockSupport.parkNanos(8_000_000L)
                     }
                 } else {
                     val socket = try {
@@ -793,20 +798,20 @@ class MainActivity : AppCompatActivity() {
                     while (!mExitFlag) {
                         if (mShowDelay)
                             sendPing(address)
-                        val buttons = InputEvent(mLastButtons, mCurrentAirHeight, mTestButton, mServiceButton)
-                        val buffer = applyKeys(buttons/* ?: InputEvent()*/, IoBuffer())
-                        val packet = constructPacket(buffer)
+                        mCachedInputEvent.keys = mLastButtons; mCachedInputEvent.airHeight = mCurrentAirHeight; mCachedInputEvent.testButton = mTestButton; mCachedInputEvent.serviceButton = mServiceButton
+                        val buffer = applyKeys(mCachedInputEvent, mCachedIoBuffer)
+                        val packet = constructPacket(buffer, mCachedPacketBuf, mCachedPacket)
                         try {
                             socket.send(packet)
                             if (mEnableNFC)
-                                socket.send(constructCardPacket())
+                                socket.send(constructCardPacket(mCachedCardBuf, mCachedCardPacket))
                         } catch (e: Exception) {
                             e.printStackTrace()
                             Thread.sleep(100)
                             continue
                         }
                         //Thread.sleep(2)
-                        Thread.sleep(1)
+                        java.util.concurrent.locks.LockSupport.parkNanos(8_000_000L)
                     }
                     socket.close()
                 }
@@ -998,8 +1003,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var currentPacketId = 1
-    private fun constructBuffer(buffer: IoBuffer): ByteArray {
-        val realBuf = ByteArray(48)
+    private fun constructBuffer(buffer: IoBuffer, realBuf: ByteArray): ByteArray {
+
         realBuf[0] = buffer.length.toByte()
         buffer.header.copyInto(realBuf, 1)
         ByteBuffer.wrap(realBuf).putInt(4, currentPacketId++)
@@ -1016,13 +1021,13 @@ class MainActivity : AppCompatActivity() {
         return realBuf
     }
 
-    private fun constructPacket(buffer: IoBuffer): DatagramPacket {
-        val realBuf = constructBuffer(buffer)
-        return DatagramPacket(realBuf, buffer.length + 1)
+    private fun constructPacket(buffer: IoBuffer, packetBuf: ByteArray, packet: DatagramPacket): DatagramPacket {
+        constructBuffer(buffer, packetBuf)
+        packet.length = buffer.length + 1; return packet
     }
 
-    private fun constructCardData(): ByteArray {
-        val buf = ByteArray(24)
+    private fun constructCardData(buf: ByteArray): ByteArray {
+
         byteArrayOf(15, 'C'.byte(), 'R'.byte(), 'D'.byte()).copyInto(buf)
         buf[4] = if (hasCard) 1 else 0
         buf[5] = cardType.ordinal.toByte()
@@ -1031,9 +1036,9 @@ class MainActivity : AppCompatActivity() {
         return buf
     }
 
-    private fun constructCardPacket(): DatagramPacket {
-        val buf = constructCardData()
-        return DatagramPacket(buf, buf[0] + 1)
+    private fun constructCardPacket(buf: ByteArray, packet: DatagramPacket): DatagramPacket {
+        constructCardData(buf)
+        packet.length = buf[0] + 1; return packet
     }
 
     private val airUpdateInterval = 10L
@@ -1049,9 +1054,10 @@ class MainActivity : AppCompatActivity() {
                 buffer.header = byteArrayOf('I'.byte(), 'P'.byte(), 'T'.byte())
             }
 
-            if (event.keys != null && event.keys.isNotEmpty()) {
+            buffer.slider.fill(0)
+            if (event.keys != null && event.keys!!.isNotEmpty()) {
                 for (i in 0 until 32) {
-                    buffer.slider[31 - i] = if (event.keys.contains(i)) 0x80.toByte() else 0x0
+                    buffer.slider[31 - i] = if (event.keys!!.contains(i)) 0x80.toByte() else 0x0
                 }
             }
 
@@ -1092,12 +1098,11 @@ class MainActivity : AppCompatActivity() {
                 else -> continue
             }
             val right = left + width
-            mLEDCanvas.drawRect(left, 0f, right, drawHeight.toFloat(), color.toPaint())
+            mLEDCanvas.drawRect(left, 0f, right, drawHeight.toFloat(), mLEDPaint.apply { setColor(color.toInt()) })
             drawXOffset += width
         }
         mButtonRenderer.postInvalidate()
     }
-    private fun Long.toPaint(): Paint = Paint().apply { color = toInt() }
 
     companion object {
         private const val TAG = "Brokenithm"
